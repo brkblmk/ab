@@ -59,7 +59,7 @@ async function getFileTimestampsWithIno(path) {
       ino: String(stat.ino)
     }
   } catch (err) {
-    Logger.error('[fileUtils] Failed to getFileTimestampsWithIno', err)
+    Logger.error(`[fileUtils] Failed to getFileTimestampsWithIno for path "${path}"`, err)
     return false
   }
 }
@@ -357,7 +357,10 @@ module.exports.removeFile = (path) => {
 }
 
 module.exports.encodeUriPath = (path) => {
-  const uri = new URL(path, "file://")
+  const uri = new URL('/', "file://")
+  // we assign the path here to assure that URL control characters like # are
+  // actually interpreted as part of the URL path
+  uri.pathname = path
   return uri.pathname
 }
 
@@ -366,15 +369,16 @@ module.exports.encodeUriPath = (path) => {
  * This method is necessary because fs.access(directory, fs.constants.W_OK) does not work on Windows
  * 
  * @param {string} directory 
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
 module.exports.isWritable = async (directory) => {
   try {
-    const accessTestFile = path.join(directory, 'accessTest')
+    const accessTestFile = Path.join(directory, 'accessTest')
     await fs.writeFile(accessTestFile, '')
     await fs.remove(accessTestFile)
     return true
   } catch (err) {
+    Logger.info(`[fileUtils] Directory is not writable "${directory}"`, err)
     return false
   }
 }

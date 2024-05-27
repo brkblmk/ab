@@ -25,11 +25,13 @@ module.exports = {
     meta: [
       { charset: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { hid: 'description', name: 'description', content: '' }
+      { hid: 'description', name: 'description', content: '' },
+      { hid: 'robots', name: 'robots', content: 'noindex' }
     ],
     script: [],
     link: [
-      { rel: 'icon', type: 'image/x-icon', href: (process.env.ROUTER_BASE_PATH || '') + '/favicon.ico' }
+      { rel: 'icon', type: 'image/x-icon', href: (process.env.ROUTER_BASE_PATH || '') + '/favicon.ico' },
+      { rel: 'apple-touch-icon', href: (process.env.ROUTER_BASE_PATH || '') + '/ios_icon.png' }
     ]
   },
 
@@ -95,7 +97,7 @@ module.exports = {
     meta: {
       appleStatusBarStyle: 'black',
       name: 'Audiobookshelf',
-      theme_color: '#373838',
+      theme_color: '#232323',
       mobileAppIOS: true,
       nativeUI: true
     },
@@ -103,7 +105,7 @@ module.exports = {
       name: 'Audiobookshelf',
       short_name: 'Audiobookshelf',
       display: 'standalone',
-      background_color: '#373838',
+      background_color: '#232323',
       icons: [
         {
           src: (process.env.ROUTER_BASE_PATH || '') + '/icon.svg',
@@ -151,4 +153,6 @@ module.exports = {
  * See: [Issue tracker](https://github.com/nuxt-community/tailwindcss-module/issues/480)
  */
   devServerHandlers: [],
+
+  ignore: ["**/*.test.*", "**/*.cy.*"]
 }

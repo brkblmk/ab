@@ -132,6 +132,11 @@ class Database {
     return this.models.playbackSession
   }
 
+  /** @type {typeof import('./models/CustomMetadataProvider')} */
+  get customMetadataProviderModel() {
+    return this.models.customMetadataProvider
+  }
+
   /**
    * Check if db file exists
    * @returns {boolean}
@@ -212,7 +217,6 @@ class Database {
   async disconnect() {
     Logger.info(`[Database] Disconnecting sqlite db`)
     await this.sequelize.close()
-    this.sequelize = null
   }
 
   /**
@@ -245,6 +249,7 @@ class Database {
     require('./models/Feed').init(this.sequelize)
     require('./models/FeedEpisode').init(this.sequelize)
     require('./models/Setting').init(this.sequelize)
+    require('./models/CustomMetadataProvider').init(this.sequelize)
 
     return this.sequelize.sync({ force, alter: false })
   }
@@ -413,10 +418,21 @@ class Database {
     await this.models.libraryItem.fullCreateFromOld(oldLibraryItem)
   }
 
+  /**
+   * Save metadata file and update library item
+   * 
+   * @param {import('./objects/LibraryItem')} oldLibraryItem 
+   * @returns {Promise<boolean>}
+   */
   async updateLibraryItem(oldLibraryItem) {
     if (!this.sequelize) return false
     await oldLibraryItem.saveMetadata()
-    return this.models.libraryItem.fullUpdateFromOld(oldLibraryItem)
+    const updated = await this.models.libraryItem.fullUpdateFromOld(oldLibraryItem)
+    // Clear library filter data cache
+    if (updated) {
+      delete this.libraryFilterData[oldLibraryItem.libraryId]
+    }
+    return updated
   }
 
   async removeLibraryItem(libraryItemId) {
@@ -670,6 +686,34 @@ class Database {
       return this.seriesModel.checkExistsById(seriesId)
     }
     return this.libraryFilterData[libraryId].series.some(se => se.id === seriesId)
+  }
+
+  /**
+   * Get author id for library by name. Uses library filter data if available
+   * 
+   * @param {string} libraryId 
+   * @param {string} authorName 
+   * @returns {Promise<string>} author id or null if not found 
+   */
+  async getAuthorIdByName(libraryId, authorName) {
+    if (!this.libraryFilterData[libraryId]) {
+      return (await this.authorModel.getOldByNameAndLibrary(authorName, libraryId))?.id || null
+    }
+    return this.libraryFilterData[libraryId].authors.find(au => au.name === authorName)?.id || null
+  }
+
+  /**
+   * Get series id for library by name. Uses library filter data if available
+   * 
+   * @param {string} libraryId 
+   * @param {string} seriesName 
+   * @returns {Promise<string>} series id or null if not found
+   */
+  async getSeriesIdByName(libraryId, seriesName) {
+    if (!this.libraryFilterData[libraryId]) {
+      return (await this.seriesModel.getOldByNameAndLibrary(seriesName, libraryId))?.id || null
+    }
+    return this.libraryFilterData[libraryId].series.find(se => se.name === seriesName)?.id || null
   }
 
   /**

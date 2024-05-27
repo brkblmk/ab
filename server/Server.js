@@ -2,10 +2,10 @@ const Path = require('path')
 const Sequelize = require('sequelize')
 const express = require('express')
 const http = require('http')
+const util = require('util')
 const fs = require('./libs/fsExtra')
 const fileUpload = require('./libs/expressFileupload')
-const rateLimit = require('./libs/expressRateLimit')
-const cookieParser = require("cookie-parser")
+const cookieParser = require('cookie-parser')
 
 const { version } = require('../package.json')
 
@@ -21,11 +21,11 @@ const SocketAuthority = require('./SocketAuthority')
 const ApiRouter = require('./routers/ApiRouter')
 const HlsRouter = require('./routers/HlsRouter')
 
+const LogManager = require('./managers/LogManager')
 const NotificationManager = require('./managers/NotificationManager')
 const EmailManager = require('./managers/EmailManager')
 const AbMergeManager = require('./managers/AbMergeManager')
 const CacheManager = require('./managers/CacheManager')
-const LogManager = require('./managers/LogManager')
 const BackupManager = require('./managers/BackupManager')
 const PlaybackSessionManager = require('./managers/PlaybackSessionManager')
 const PodcastManager = require('./managers/PodcastManager')
@@ -41,17 +41,16 @@ const passport = require('passport')
 const expressSession = require('express-session')
 
 class Server {
-  constructor(SOURCE, PORT, HOST, UID, GID, CONFIG_PATH, METADATA_PATH, ROUTER_BASE_PATH) {
+  constructor(SOURCE, PORT, HOST, CONFIG_PATH, METADATA_PATH, ROUTER_BASE_PATH) {
     this.Port = PORT
     this.Host = HOST
     global.Source = SOURCE
     global.isWin = process.platform === 'win32'
-    global.Uid = isNaN(UID) ? undefined : Number(UID)
-    global.Gid = isNaN(GID) ? undefined : Number(GID)
     global.ConfigPath = fileUtils.filePathToPOSIX(Path.normalize(CONFIG_PATH))
     global.MetadataPath = fileUtils.filePathToPOSIX(Path.normalize(METADATA_PATH))
     global.RouterBasePath = ROUTER_BASE_PATH
     global.XAccel = process.env.USE_X_ACCEL
+    global.AllowCors = process.env.ALLOW_CORS === '1'
 
     if (!fs.pathExistsSync(global.ConfigPath)) {
       fs.mkdirSync(global.ConfigPath)
@@ -67,7 +66,6 @@ class Server {
     this.notificationManager = new NotificationManager()
     this.emailManager = new EmailManager()
     this.backupManager = new BackupManager()
-    this.logManager = new LogManager()
     this.abMergeManager = new AbMergeManager()
     this.playbackSessionManager = new PlaybackSessionManager()
     this.podcastManager = new PodcastManager(this.watcher, this.notificationManager)
@@ -81,7 +79,7 @@ class Server {
     this.apiRouter = new ApiRouter(this)
     this.hlsRouter = new HlsRouter(this.auth, this.playbackSessionManager)
 
-    Logger.logManager = this.logManager
+    Logger.logManager = new LogManager()
 
     this.server = null
     this.io = null
@@ -102,9 +100,12 @@ class Server {
    */
   async init() {
     Logger.info('[Server] Init v' + version)
+
     await this.playbackSessionManager.removeOrphanStreams()
 
     await Database.init(false)
+
+    await Logger.logManager.init()
 
     // Create token secret if does not exist (Added v2.1.0)
     if (!Database.serverSettings.tokenSecret) {
@@ -115,7 +116,6 @@ class Server {
     await CacheManager.ensureCachePaths()
 
     await this.backupManager.init()
-    await this.logManager.init()
     await this.rssFeedManager.init()
 
     const libraries = await Database.libraryModel.getAllOldLibraries()
@@ -135,8 +135,41 @@ class Server {
     }
   }
 
+  /**
+   * Listen for SIGINT and uncaught exceptions
+   */
+  initProcessEventListeners() {
+    let sigintAlreadyReceived = false
+    process.on('SIGINT', async () => {
+      if (!sigintAlreadyReceived) {
+        sigintAlreadyReceived = true
+        Logger.info('SIGINT (Ctrl+C) received. Shutting down...')
+        await this.stop()
+        Logger.info('Server stopped. Exiting.')
+      } else {
+        Logger.info('SIGINT (Ctrl+C) received again. Exiting immediately.')
+      }
+      process.exit(0)
+    })
+
+    /**
+     * @see https://nodejs.org/api/process.html#event-uncaughtexceptionmonitor
+     */
+    process.on('uncaughtExceptionMonitor', async (error, origin) => {
+      await Logger.fatal(`[Server] Uncaught exception origin: ${origin}, error:`, util.format('%O', error))
+    })
+    /**
+     * @see https://nodejs.org/api/process.html#event-unhandledrejection
+     */
+    process.on('unhandledRejection', async (reason, promise) => {
+      await Logger.fatal(`[Server] Unhandled rejection: ${reason}, promise:`, util.format('%O', promise))
+      process.exit(1)
+    })
+  }
+
   async start() {
     Logger.info('=== Starting Server ===')
+    this.initProcessEventListeners()
     await this.init()
 
     const app = express()
@@ -148,15 +181,16 @@ class Server {
      * so we have to allow cors for specific origins to the /api/items/:id/ebook endpoint
      * The cover image is fetched with XMLHttpRequest in the mobile apps to load into a canvas and extract colors
      * @see https://ionicframework.com/docs/troubleshooting/cors
-     * 
-     * Running in development allows cors to allow testing the mobile apps in the browser 
+     *
+     * Running in development allows cors to allow testing the mobile apps in the browser
+     * or env variable ALLOW_CORS = '1'
      */
     app.use((req, res, next) => {
       if (Logger.isDev || req.path.match(/\/api\/items\/([a-z0-9-]{36})\/(ebook|cover)(\/[0-9]+)?/)) {
         const allowedOrigins = ['capacitor://localhost', 'http://localhost']
-        if (Logger.isDev || allowedOrigins.some(o => o === req.get('origin'))) {
+        if (global.AllowCors || Logger.isDev || allowedOrigins.some((o) => o === req.get('origin'))) {
           res.header('Access-Control-Allow-Origin', req.get('origin'))
-          res.header("Access-Control-Allow-Methods", 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
           res.header('Access-Control-Allow-Headers', '*')
           res.header('Access-Control-Allow-Credentials', true)
           if (req.method === 'OPTIONS') {
@@ -171,15 +205,17 @@ class Server {
     // parse cookies in requests
     app.use(cookieParser())
     // enable express-session
-    app.use(expressSession({
-      secret: global.ServerSettings.tokenSecret,
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        // also send the cookie if were are not on https (not every use has https)
-        secure: false
-      },
-    }))
+    app.use(
+      expressSession({
+        secret: global.ServerSettings.tokenSecret,
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+          // also send the cookie if were are not on https (not every use has https)
+          secure: false
+        }
+      })
+    )
     // init passport.js
     app.use(passport.initialize())
     // register passport in express-session
@@ -193,14 +229,16 @@ class Server {
 
     this.server = http.createServer(app)
 
-    router.use(fileUpload({
-      defCharset: 'utf8',
-      defParamCharset: 'utf8',
-      useTempFiles: true,
-      tempFileDir: Path.join(global.MetadataPath, 'tmp')
-    }))
-    router.use(express.urlencoded({ extended: true, limit: "5mb" }))
-    router.use(express.json({ limit: "5mb" }))
+    router.use(
+      fileUpload({
+        defCharset: 'utf8',
+        defParamCharset: 'utf8',
+        useTempFiles: true,
+        tempFileDir: Path.join(global.MetadataPath, 'tmp')
+      })
+    )
+    router.use(express.urlencoded({ extended: true, limit: '5mb' }))
+    router.use(express.json({ limit: '5mb' }))
 
     // Static path to generated nuxt
     const distPath = Path.join(global.appRoot, '/client/dist')
@@ -252,8 +290,6 @@ class Server {
     ]
     dyanimicRoutes.forEach((route) => router.get(route, (req, res) => res.sendFile(Path.join(distPath, 'index.html'))))
 
-    // router.post('/login', passport.authenticate('local', this.auth.login), this.auth.loginResult.bind(this))
-    // router.post('/logout', this.authMiddleware.bind(this), this.logout.bind(this))
     router.post('/init', (req, res) => {
       if (Database.hasRootUser) {
         Logger.error(`[Server] attempt to init server when server already has a root user`)
@@ -283,19 +319,6 @@ class Server {
       res.json({ success: true })
     })
     app.get('/healthcheck', (req, res) => res.sendStatus(200))
-
-    let sigintAlreadyReceived = false
-    process.on('SIGINT', async () => {
-      if (!sigintAlreadyReceived) {
-        sigintAlreadyReceived = true
-        Logger.info('SIGINT (Ctrl+C) received. Shutting down...')
-        await this.stop()
-        Logger.info('Server stopped. Exiting.')
-      } else {
-        Logger.info('SIGINT (Ctrl+C) received again. Exiting immediately.')
-      }
-      process.exit(0)
-    })
 
     this.server.listen(this.Port, this.Host, () => {
       if (this.Host) Logger.info(`Listening on http://${this.Host}:${this.Port}`)
@@ -344,7 +367,7 @@ class Server {
       const mediaProgressRemoved = await Database.mediaProgressModel.destroy({
         where: {
           id: {
-            [Sequelize.Op.in]: mediaProgressToRemove.map(mp => mp.id)
+            [Sequelize.Op.in]: mediaProgressToRemove.map((mp) => mp.id)
           }
         }
       })
@@ -358,15 +381,18 @@ class Server {
     for (const _user of users) {
       let hasUpdated = false
       if (_user.seriesHideFromContinueListening.length) {
-        const seriesHiding = (await Database.seriesModel.findAll({
-          where: {
-            id: _user.seriesHideFromContinueListening
-          },
-          attributes: ['id'],
-          raw: true
-        })).map(se => se.id)
-        _user.seriesHideFromContinueListening = _user.seriesHideFromContinueListening.filter(seriesId => {
-          if (!seriesHiding.includes(seriesId)) { // Series removed
+        const seriesHiding = (
+          await Database.seriesModel.findAll({
+            where: {
+              id: _user.seriesHideFromContinueListening
+            },
+            attributes: ['id'],
+            raw: true
+          })
+        ).map((se) => se.id)
+        _user.seriesHideFromContinueListening = _user.seriesHideFromContinueListening.filter((seriesId) => {
+          if (!seriesHiding.includes(seriesId)) {
+            // Series removed
             hasUpdated = true
             return false
           }
@@ -377,30 +403,6 @@ class Server {
         await Database.updateUser(_user)
       }
     }
-  }
-
-  // First time login rate limit is hit
-  loginLimitReached(req, res, options) {
-    Logger.error(`[Server] Login rate limit (${options.max}) was hit for ip ${req.ip}`)
-    options.message = 'Too many attempts. Login temporarily locked.'
-  }
-
-  getLoginRateLimiter() {
-    return rateLimit({
-      windowMs: Database.serverSettings.rateLimitLoginWindow, // 5 minutes
-      max: Database.serverSettings.rateLimitLoginRequests,
-      skipSuccessfulRequests: true,
-      onLimitReached: this.loginLimitReached
-    })
-  }
-
-  logout(req, res) {
-    if (req.body.socketId) {
-      Logger.info(`[Server] User ${req.user ? req.user.username : 'Unknown'} is logging out with socket ${req.body.socketId}`)
-      SocketAuthority.logout(req.body.socketId)
-    }
-
-    res.sendStatus(200)
   }
 
   /**

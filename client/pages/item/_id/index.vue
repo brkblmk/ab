@@ -27,17 +27,20 @@
               <h1 class="text-2xl md:text-3xl font-semibold">
                 <div class="flex items-center">
                   {{ title }}
-                  <widgets-explicit-indicator :explicit="isExplicit" />
+                  <widgets-explicit-indicator v-if="isExplicit" />
                   <widgets-abridged-indicator v-if="isAbridged" />
                 </div>
               </h1>
 
               <p v-if="bookSubtitle" class="text-gray-200 text-xl md:text-2xl">{{ bookSubtitle }}</p>
 
-              <nuxt-link v-for="_series in seriesList" :key="_series.id" :to="`/library/${libraryId}/series/${_series.id}`" class="hover:underline font-sans text-gray-300 text-lg leading-7"> {{ _series.text }}</nuxt-link>
+              <template v-for="(_series, index) in seriesList">
+                <nuxt-link :key="_series.id" :to="`/library/${libraryId}/series/${_series.id}`" class="hover:underline font-sans text-gray-300 text-lg leading-7">{{ _series.text }}</nuxt-link
+                ><span :key="index" v-if="index < seriesList.length - 1">, </span>
+              </template>
 
               <template v-if="!isVideo">
-                <p v-if="isPodcast" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl">by {{ podcastAuthor || 'Unknown' }}</p>
+                <p v-if="isPodcast" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl">{{ $getString('LabelByAuthor', [podcastAuthor]) }}</p>
                 <p v-else-if="musicArtists.length" class="mb-2 mt-0.5 text-gray-200 text-lg md:text-xl max-w-[calc(100vw-2rem)] overflow-hidden overflow-ellipsis">
                   <nuxt-link v-for="(artist, index) in musicArtists" :key="index" :to="`/artist/${$encode(artist)}`" class="hover:underline">{{ artist }}<span v-if="index < musicArtists.length - 1">,&nbsp;</span></nuxt-link>
                 </p>
@@ -125,20 +128,17 @@
           </div>
 
           <div class="my-4 w-full">
-            <p class="text-base text-gray-100 whitespace-pre-line">{{ description }}</p>
+            <p ref="description" id="item-description" dir="auto" class="text-base text-gray-100 whitespace-pre-line mb-1" :class="{ 'show-full': showFullDescription }">{{ description }}</p>
+            <button v-if="isDescriptionClamped" class="py-0.5 flex items-center text-slate-300 hover:text-white" @click="showFullDescription = !showFullDescription">
+              {{ showFullDescription ? $strings.ButtonReadLess : $strings.ButtonReadMore }} <span class="material-icons text-xl pl-1">{{ showFullDescription ? 'expand_less' : 'expand_more' }}</span>
+            </button>
           </div>
-
-          <div v-if="invalidAudioFiles.length" class="bg-error border-red-800 shadow-md p-4">
-            <p class="text-sm mb-2">Invalid audio files</p>
-
-            <p v-for="audioFile in invalidAudioFiles" :key="audioFile.id" class="text-xs pl-2">- {{ audioFile.metadata.filename }} ({{ audioFile.error }})</p>
-          </div>
-
-          <widgets-audiobook-data v-if="tracks.length" :library-item-id="libraryItemId" :is-file="isFile" :media="media" />
-
-          <tables-podcast-lazy-episodes-table v-if="isPodcast" :library-item="libraryItem" />
 
           <tables-chapters-table v-if="chapters.length" :library-item="libraryItem" class="mt-6" />
+
+          <tables-tracks-table v-if="tracks.length" :title="$strings.LabelStatsAudioTracks" :tracks="tracksWithAudioFile" :is-file="isFile" :library-item-id="libraryItemId" class="mt-6" />
+
+          <tables-podcast-lazy-episodes-table v-if="isPodcast" :library-item="libraryItem" />
 
           <tables-ebook-files-table v-if="ebookFiles.length" :library-item="libraryItem" class="mt-6" />
 
@@ -182,7 +182,9 @@ export default {
       podcastFeedEpisodes: [],
       episodesDownloading: [],
       episodeDownloadsQueued: [],
-      showBookmarksModal: false
+      showBookmarksModal: false,
+      isDescriptionClamped: false,
+      showFullDescription: false
     }
   },
   computed: {
@@ -234,10 +236,6 @@ export default {
     isAbridged() {
       return !!this.mediaMetadata.abridged
     },
-    invalidAudioFiles() {
-      if (!this.isBook) return []
-      return this.libraryItem.media.audioFiles.filter((af) => af.invalid)
-    },
     showPlayButton() {
       if (this.isMissing || this.isInvalid) return false
       if (this.isMusic) return !!this.audioFile
@@ -270,6 +268,12 @@ export default {
     tracks() {
       return this.media.tracks || []
     },
+    tracksWithAudioFile() {
+      return this.tracks.map((track) => {
+        track.audioFile = this.media.audioFiles?.find((af) => af.metadata.path === track.metadata.path)
+        return track
+      })
+    },
     podcastEpisodes() {
       return this.media.episodes || []
     },
@@ -281,7 +285,7 @@ export default {
       return this.mediaMetadata.subtitle
     },
     podcastAuthor() {
-      return this.mediaMetadata.author || ''
+      return this.mediaMetadata.author || 'Unknown'
     },
     authors() {
       return this.mediaMetadata.authors || []
@@ -596,10 +600,15 @@ export default {
       this.$store.commit('setBookshelfBookIds', [])
       this.$store.commit('showEditModal', this.libraryItem)
     },
+    checkDescriptionClamped() {
+      if (!this.$refs.description) return
+      this.isDescriptionClamped = this.$refs.description.scrollHeight > this.$refs.description.clientHeight
+    },
     libraryItemUpdated(libraryItem) {
       if (libraryItem.id === this.libraryItemId) {
         console.log('Item was updated', libraryItem)
         this.libraryItem = libraryItem
+        this.$nextTick(this.checkDescriptionClamped)
       }
     },
     clearProgressClick() {
@@ -756,6 +765,8 @@ export default {
     }
   },
   mounted() {
+    this.checkDescriptionClamped()
+
     this.episodeDownloadsQueued = this.libraryItem.episodeDownloadsQueued || []
     this.episodesDownloading = this.libraryItem.episodesDownloading || []
 
@@ -782,3 +793,18 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+#item-description {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  max-height: 6.25rem;
+  transition: all 0.3s ease-in-out;
+}
+#item-description.show-full {
+  -webkit-line-clamp: unset;
+  max-height: 999rem;
+}
+</style>

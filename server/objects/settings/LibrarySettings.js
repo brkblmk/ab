@@ -8,9 +8,12 @@ class LibrarySettings {
     this.skipMatchingMediaWithIsbn = false
     this.autoScanCronExpression = null
     this.audiobooksOnly = false
-    this.hideSingleBookSeries = false // Do not show series that only have 1 book 
+    this.epubsAllowScriptedContent = false
+    this.hideSingleBookSeries = false // Do not show series that only have 1 book
+    this.onlyShowLaterBooksInContinueSeries = false // Skip showing books that are earlier than the max sequence read
     this.bitrateType = 'maxBitrate'
     this.metadataPrecedence = ['folderStructure', 'audioMetatags', 'nfoFile', 'txtFiles', 'opfFile', 'absMetadata']
+    this.podcastSearchRegion = 'us'
 
     if (settings) {
       this.construct(settings)
@@ -24,7 +27,9 @@ class LibrarySettings {
     this.skipMatchingMediaWithIsbn = !!settings.skipMatchingMediaWithIsbn
     this.autoScanCronExpression = settings.autoScanCronExpression || null
     this.audiobooksOnly = !!settings.audiobooksOnly
+    this.epubsAllowScriptedContent = !!settings.epubsAllowScriptedContent
     this.hideSingleBookSeries = !!settings.hideSingleBookSeries
+    this.onlyShowLaterBooksInContinueSeries = !!settings.onlyShowLaterBooksInContinueSeries
     this.bitrateType = settings.bitrateType || 'maxBitrate'
     if (settings.metadataPrecedence) {
       this.metadataPrecedence = [...settings.metadataPrecedence]
@@ -32,6 +37,7 @@ class LibrarySettings {
       // Added in v2.4.5
       this.metadataPrecedence = ['folderStructure', 'audioMetatags', 'nfoFile', 'txtFiles', 'opfFile', 'absMetadata']
     }
+    this.podcastSearchRegion = settings.podcastSearchRegion || 'us'
   }
 
   toJSON() {
@@ -42,9 +48,12 @@ class LibrarySettings {
       skipMatchingMediaWithIsbn: this.skipMatchingMediaWithIsbn,
       autoScanCronExpression: this.autoScanCronExpression,
       audiobooksOnly: this.audiobooksOnly,
+      epubsAllowScriptedContent: this.epubsAllowScriptedContent,
       hideSingleBookSeries: this.hideSingleBookSeries,
+      onlyShowLaterBooksInContinueSeries: this.onlyShowLaterBooksInContinueSeries,
       bitrateType: this.bitrateType,
-      metadataPrecedence: [...this.metadataPrecedence]
+      metadataPrecedence: [...this.metadataPrecedence],
+      podcastSearchRegion: this.podcastSearchRegion
     }
   }
 
