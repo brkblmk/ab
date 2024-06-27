@@ -11,6 +11,7 @@ class LibrarySettings {
     this.epubsAllowScriptedContent = false
     this.hideSingleBookSeries = false // Do not show series that only have 1 book
     this.onlyShowLaterBooksInContinueSeries = false // Skip showing books that are earlier than the max sequence read
+    this.bitrateType = 'maxBitrate'
     this.metadataPrecedence = ['folderStructure', 'audioMetatags', 'nfoFile', 'txtFiles', 'opfFile', 'absMetadata']
     this.podcastSearchRegion = 'us'
 
@@ -29,6 +30,7 @@ class LibrarySettings {
     this.epubsAllowScriptedContent = !!settings.epubsAllowScriptedContent
     this.hideSingleBookSeries = !!settings.hideSingleBookSeries
     this.onlyShowLaterBooksInContinueSeries = !!settings.onlyShowLaterBooksInContinueSeries
+    this.bitrateType = settings.bitrateType || 'maxBitrate'
     if (settings.metadataPrecedence) {
       this.metadataPrecedence = [...settings.metadataPrecedence]
     } else {
@@ -49,6 +51,7 @@ class LibrarySettings {
       epubsAllowScriptedContent: this.epubsAllowScriptedContent,
       hideSingleBookSeries: this.hideSingleBookSeries,
       onlyShowLaterBooksInContinueSeries: this.onlyShowLaterBooksInContinueSeries,
+      bitrateType: this.bitrateType,
       metadataPrecedence: [...this.metadataPrecedence],
       podcastSearchRegion: this.podcastSearchRegion
     }
